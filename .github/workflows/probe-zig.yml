@@ -1,0 +1,47 @@
+name: probe-zig
+on:
+  push:
+    branches: [probe-zig-a, probe-zig-b, probe-zig-c]
+  workflow_dispatch:
+jobs:
+  zig:
+    name: target (zig,ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-rust
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build xtask
+        run: cargo build -p xtask
+      - name: Prepare Meta
+        id: prepare-meta
+        run: cargo xtask ci-job prepare-meta "${TARGET}"
+        env:
+          TARGET: zig
+        shell: bash
+      - name: Show meta
+        run: echo "has-image=${{ steps.prepare-meta.outputs.has-image }} image=${{ steps.prepare-meta.outputs.image }} test-variant=${{ steps.prepare-meta.outputs.test-variant }}"
+      - name: Build Docker image
+        id: build-docker-image
+        run: cargo xtask build-docker-image -v "${TARGET}"
+        env:
+          TARGET: zig
+          LATEST: 'false'
+        shell: bash
+      - name: Set Docker image for test
+        run: |
+          TARGET_VAR="cross_target_${TARGET//-/_}_image"
+          echo "${TARGET_VAR^^}=${IMAGE}" | tee -a "${GITHUB_ENV}"
+        env:
+          TARGET: zig
+          IMAGE: ${{ steps.build-docker-image.outputs.image }}
+        shell: bash
+      - name: Versions inside image
+        run: docker run --rm "${IMAGE}" sh -c 'zig version; cargo-zigbuild --version'
+        env:
+          IMAGE: ${{ steps.build-docker-image.outputs.image }}
+      - name: Test Zig Image
+        run: ./ci/test-zig-image.sh
+        shell: bash
